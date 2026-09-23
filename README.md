@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/logo.png" alt="PinPoint logo" width="180">
+</p>
+
 # PinPoint
 
 **From datasheet to working code, verified.**
