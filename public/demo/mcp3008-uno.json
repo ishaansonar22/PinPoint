@@ -1,0 +1,107 @@
+{
+  "board": "arduino-uno",
+  "spec": {
+    "part_name": "MCP3008",
+    "description": "8-channel, 10-bit successive-approximation ADC with an SPI-compatible serial interface, sampling up to 200 ksps at 5 V.",
+    "interface": "SPI",
+    "operating_voltage": "2.7V to 5.5V",
+    "logic_voltage": "2.7V to 5.5V",
+    "i2c_address": null,
+    "pins": [
+      {
+        "sensor_pin": "VDD",
+        "board_pin": "5V",
+        "direction": "power",
+        "uses_adc": false,
+        "note": "Digital and analog supply."
+      },
+      {
+        "sensor_pin": "VREF",
+        "board_pin": "5V",
+        "direction": "power",
+        "uses_adc": false,
+        "note": "Reference sets full-scale input; here 5 V, so 1 LSB ≈ 4.88 mV."
+      },
+      {
+        "sensor_pin": "AGND",
+        "board_pin": "GND",
+        "direction": "ground",
+        "uses_adc": false,
+        "note": "Analog ground."
+      },
+      {
+        "sensor_pin": "DGND",
+        "board_pin": "GND",
+        "direction": "ground",
+        "uses_adc": false,
+        "note": "Digital ground."
+      },
+      {
+        "sensor_pin": "CLK",
+        "board_pin": "D13",
+        "direction": "output",
+        "uses_adc": false,
+        "note": "SPI clock (SCK)."
+      },
+      {
+        "sensor_pin": "DOUT",
+        "board_pin": "D12",
+        "direction": "input",
+        "uses_adc": false,
+        "note": "SPI data out of the ADC (MISO)."
+      },
+      {
+        "sensor_pin": "DIN",
+        "board_pin": "D11",
+        "direction": "output",
+        "uses_adc": false,
+        "note": "SPI data into the ADC (MOSI)."
+      },
+      {
+        "sensor_pin": "CS/SHDN",
+        "board_pin": "D9",
+        "direction": "output",
+        "uses_adc": false,
+        "note": "Active-low chip select; high puts the ADC in shutdown."
+      }
+    ],
+    "init_sequence": [],
+    "driver_code": "/*\n * MCP3008 8-channel 10-bit ADC driver — Arduino Uno (SPI)\n * Datasheet: Microchip DS21295 (MCP3004/MCP3008)\n *\n * Wiring (ADC pin -> board pin):\n *   VDD     -> 5V\n *   VREF    -> 5V     (full-scale reference; 1 LSB = VREF / 1024, p.13)\n *   AGND    -> GND\n *   DGND    -> GND\n *   CLK     -> D13    (hardware SCK)\n *   DOUT    -> D12    (hardware MISO)\n *   DIN     -> D11    (hardware MOSI)\n *   CS/SHDN -> D9     (chip select; D10 kept as OUTPUT so the Uno stays SPI master)\n *   CH0..7  -> your analog signals (0 V .. VREF)\n */\n\n#include <SPI.h>\n\nconst int ADC_CS_PIN = 9;\nconst int HW_SS_PIN  = 10;              // must stay an OUTPUT in master mode\n\n// SPI mode 0,0: clock idle low, data latched on rising edge (p.15).\n// Max clock 3.6 MHz at 5 V (p.4); 1 MHz leaves margin on breadboards.\nSPISettings mcpSettings(1000000, MSBFIRST, SPI_MODE0);\n\n// Single-ended read of channel 0..7 using 8-bit segments (Figure 6-1, p.21)\nuint16_t mcp3008Read(uint8_t channel) {\n  channel &= 0x07;\n  SPI.beginTransaction(mcpSettings);\n  digitalWrite(ADC_CS_PIN, LOW);\n  SPI.transfer(0x01);                                   // start bit\n  uint8_t hi = SPI.transfer((0x08 | channel) << 4);     // SGL/DIFF=1, D2..D0 = channel\n  uint8_t lo = SPI.transfer(0x00);                      // clock out remaining bits\n  digitalWrite(ADC_CS_PIN, HIGH);\n  SPI.endTransaction();\n  return ((uint16_t)(hi & 0x03) << 8) | lo;             // 10-bit result, null bit discarded\n}\n\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(HW_SS_PIN, OUTPUT);\n  digitalWrite(HW_SS_PIN, HIGH);\n  pinMode(ADC_CS_PIN, OUTPUT);\n  digitalWrite(ADC_CS_PIN, HIGH);                       // idle high = shutdown/deselect (p.14)\n  SPI.begin();\n  Serial.println(\"MCP3008 ready\");\n}\n\nvoid loop() {\n  for (uint8_t ch = 0; ch < 8; ch++) {\n    uint16_t raw = mcp3008Read(ch);\n    float volts = raw * (5.0f / 1024.0f);               // VREF = 5 V\n    Serial.print(\"CH\"); Serial.print(ch); Serial.print(\": \");\n    Serial.print(raw); Serial.print(\" (\"); Serial.print(volts, 3); Serial.print(\" V)  \");\n  }\n  Serial.println();\n  delay(500);\n}\n",
+    "warnings": [
+      "Analog inputs must stay between AGND and VREF; add a series resistor or clamp for signals that may exceed 5 V.",
+      "Keep the SPI clock at or below 3.6 MHz at 5 V (1.35 MHz at 2.7 V) or conversions lose accuracy.",
+      "Place 0.1 µF decoupling capacitors close to VDD and VREF for stable readings."
+    ],
+    "source_pages": {
+      "part_name": 1,
+      "description": 1,
+      "interface": 15,
+      "operating_voltage": 2,
+      "logic_voltage": 4,
+      "pins": 13
+    }
+  },
+  "violations": [
+    {
+      "rule_id": "uno-spi-ss-pin",
+      "severity": "warning",
+      "sensor_pin": "CS/SHDN",
+      "board_pin": "D9",
+      "message": "\"CS/SHDN\" (chip select) is on D9. That works, but D10 is the hardware SS pin and must stay configured as an OUTPUT or the Uno drops out of SPI master mode.",
+      "pin_index": 7
+    }
+  ],
+  "autoCorrected": false,
+  "corrections": [],
+  "originalViolations": [
+    {
+      "rule_id": "uno-spi-ss-pin",
+      "severity": "warning",
+      "sensor_pin": "CS/SHDN",
+      "board_pin": "D9",
+      "message": "\"CS/SHDN\" (chip select) is on D9. That works, but D10 is the hardware SS pin and must stay configured as an OUTPUT or the Uno drops out of SPI master mode.",
+      "pin_index": 7
+    }
+  ],
+  "elapsedMs": 0
+}

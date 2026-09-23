@@ -1,0 +1,93 @@
+{
+  "board": "esp32-devkit",
+  "spec": {
+    "part_name": "DS18B20",
+    "description": "Programmable-resolution (9 to 12-bit) 1-Wire digital thermometer measuring -55C to +125C with +/-0.5C accuracy from -10C to +85C. Each device carries a unique 64-bit ROM code so many sensors can share one data line, and it can be powered either from VDD or parasitically from the data line.",
+    "interface": "OneWire",
+    "operating_voltage": "3.0V to 5.5V (VDD, local power)",
+    "logic_voltage": "DQ: -0.3V to +5.5V; VIH min 2.2V (local power) or 3.0V (parasite power), VIL max 0.8V; compatible with 3.3V ESP32 I/O when VDD = 3V3",
+    "i2c_address": null,
+    "pins": [
+      {
+        "sensor_pin": "GND",
+        "board_pin": "GND",
+        "direction": "ground",
+        "uses_adc": false,
+        "note": "TO-92 pin 1 / SOIC pin 5. Must not float while VDD is supplied (p.3)."
+      },
+      {
+        "sensor_pin": "DQ",
+        "board_pin": "GPIO16",
+        "direction": "bidirectional",
+        "uses_adc": false,
+        "note": "TO-92 pin 2 / SOIC pin 4. Open-drain 1-Wire data line; requires an external 4.7k pull-up resistor from DQ to 3V3 (p.4 Fig.3, p.10). ESP32 toggles between driving LOW and INPUT (released)."
+      },
+      {
+        "sensor_pin": "VDD",
+        "board_pin": "3V3",
+        "direction": "power",
+        "uses_adc": false,
+        "note": "TO-92 pin 3 / SOIC pin 3. External supply 3.0V-5.5V; use 3V3 so DQ logic levels match the ESP32. For parasite-power mode tie VDD to GND instead (p.2, p.3)."
+      }
+    ],
+    "init_sequence": [
+      {
+        "register": "Reset / Presence",
+        "value": "DQ low >= 480 us, release, expect presence pulse",
+        "purpose": "Initialization sequence that begins every 1-Wire transaction; presence pulse confirms a DS18B20 is on the bus",
+        "source_page": 14
+      },
+      {
+        "register": "ROM command",
+        "value": "0x33 (Read ROM)",
+        "purpose": "Read the 64-bit ROM: family code 0x28, 48-bit serial number, 8-bit CRC (single device on the bus only)",
+        "source_page": 11
+      },
+      {
+        "register": "ROM command",
+        "value": "0xCC (Skip ROM)",
+        "purpose": "Address the single DS18B20 without sending its 64-bit ROM code",
+        "source_page": 11
+      },
+      {
+        "register": "Function command",
+        "value": "0xB4 (Read Power Supply)",
+        "purpose": "Read one bit: 0 = parasite powered (strong pull-up needed during conversion), 1 = externally powered",
+        "source_page": 14
+      },
+      {
+        "register": "Function command + scratchpad bytes 2-4",
+        "value": "0x4E then TH=0x7D, TL=0xC9, CONFIG=0x7F",
+        "purpose": "Write Scratchpad: set alarm triggers (unused) and configuration register R1=R0=1 for 12-bit resolution (0.0625C, 750 ms conversion). All 3 bytes must be written before a reset.",
+        "source_page": 14
+      }
+    ],
+    "driver_code": "// DS18B20 1-Wire digital thermometer on ESP32 DevKit (ESP32-WROOM-32)\n// Bit-banged 1-Wire master implemented directly from the datasheet, no external libraries.\n// Wiring: VDD -> 3V3, GND -> GND, DQ -> GPIO16 with a 4.7k pull-up to 3V3 (datasheet p.4 Fig.3, p.10).\n\n#include <Arduino.h>\n\n// ---- Pin assignment (matches the pins table) ----\nconst int DS18B20_DQ = 16;   // 1-Wire data line, open drain, external 4.7k pull-up to 3V3\n\n// ---- ROM function commands (datasheet p.11) ----\nconst uint8_t CMD_READ_ROM = 0x33;\nconst uint8_t CMD_SKIP_ROM = 0xCC;\n\n// ---- Memory / control function commands (datasheet p.14, Table 4 p.18) ----\nconst uint8_t CMD_CONVERT_T        = 0x44;\nconst uint8_t CMD_WRITE_SCRATCHPAD = 0x4E;\nconst uint8_t CMD_READ_SCRATCHPAD  = 0xBE;\nconst uint8_t CMD_READ_POWER       = 0xB4;\n\n// ---- Scratchpad bytes 2..4 written with Write Scratchpad (p.8 Fig.7, p.9 Table 3) ----\n// Configuration register layout: 0 R1 R0 1 1 1 1 1 ; R1=R0=1 -> 12-bit resolution -> 0x7F\nconst uint8_t TH_DEFAULT   = 0x7D;   // +125 C alarm high (alarms not used here)\nconst uint8_t TL_DEFAULT   = 0xC9;   // -55 C alarm low (two's complement)\nconst uint8_t CONFIG_12BIT = 0x7F;\nconst uint32_t TCONV_12BIT_MS = 750; // max 12-bit conversion time (p.9 Table 3, p.25)\n\nconst uint8_t DS18B20_FAMILY_CODE = 0x28; // p.6\n\nstatic bool parasitePowered = false;\n\n// ---------- Low-level line control (open-drain emulation) ----------\nstatic inline void owDriveLow() {\n  pinMode(DS18B20_DQ, OUTPUT);\n  digitalWrite(DS18B20_DQ, LOW);\n}\nstatic inline void owRelease() {\n  pinMode(DS18B20_DQ, INPUT);      // external 4.7k pull-up raises the line\n}\nstatic inline int owSample() {\n  return digitalRead(DS18B20_DQ);\n}\n\n// Reset pulse + presence detect (p.14, Fig.11 p.18, AC table p.25):\n// master holds low >= 480 us (tRSTL), releases; slave waits 15-60 us then pulls low 60-240 us.\nbool owReset() {\n  owDriveLow();\n  delayMicroseconds(500);          // tRSTL >= 480 us\n  noInterrupts();\n  owRelease();\n  delayMicroseconds(70);           // land inside the presence pulse window\n  bool presence = (owSample() == LOW);\n  interrupts();\n  delayMicroseconds(430);          // complete tRSTH >= 480 us\n  return presence;\n}\n\n// Write time slot (p.19, p.25): slot 60-120 us, recovery >= 1 us.\n// Write 1: low for 1-15 us then release. Write 0: low for 60-120 us.\nvoid owWriteBit(uint8_t bit) {\n  noInterrupts();\n  owDriveLow();\n  if (bit) {\n    delayMicroseconds(6);          // tLOW1 = 1..15 us\n    owRelease();\n    delayMicroseconds(64);         // finish 60 us slot + recovery\n  } else {\n    delayMicroseconds(60);         // tLOW0 = 60..120 us\n    owRelease();\n    delayMicroseconds(10);         // recovery\n  }\n  interrupts();\n}\n\n// Read time slot (p.19, Fig.13/14 p.21): master low >= 1 us, release,\n// sample before 15 us after the falling edge (tRDV = 15 us max).\nuint8_t owReadBit() {\n  uint8_t bit;\n  noInterrupts();\n  owDriveLow();\n  delayMicroseconds(3);            // tINIT > 1 us\n  owRelease();\n  delayMicroseconds(10);           // sample towards the end of the 15 us window\n  bit = owSample() ? 1 : 0;\n  interrupts();\n  delayMicroseconds(53);           // complete 60 us slot + recovery\n  return bit;\n}\n\n// All data is transferred LSB first (p.2, p.5)\nvoid owWriteByte(uint8_t b) {\n  for (int i = 0; i < 8; i++) {\n    owWriteBit(b & 0x01);\n    b >>= 1;\n  }\n}\n\nuint8_t owReadByte() {\n  uint8_t b = 0;\n  for (int i = 0; i < 8; i++) {\n    b >>= 1;\n    if (owReadBit()) b |= 0x80;\n  }\n  return b;\n}\n\n// 1-Wire CRC-8, polynomial X^8 + X^5 + X^4 + 1 (p.6, Fig.6 p.8), LSB-first shift register.\n// 0x8C is the bit-reflected form of the polynomial.\nuint8_t owCrc8(const uint8_t *data, uint8_t len) {\n  uint8_t crc = 0;\n  while (len--) {\n    uint8_t inbyte = *data++;\n    for (int i = 0; i < 8; i++) {\n      uint8_t mix = (crc ^ inbyte) & 0x01;\n      crc >>= 1;\n      if (mix) crc ^= 0x8C;\n      inbyte >>= 1;\n    }\n  }\n  return crc;\n}\n\n// Read Power Supply [B4h] (p.4, p.14): read slot returns 0 = parasite, 1 = external VDD\nbool owReadPowerSupply() {\n  if (!owReset()) return false;\n  owWriteByte(CMD_SKIP_ROM);\n  owWriteByte(CMD_READ_POWER);\n  return owReadBit() == 0;   // true when parasite powered\n}\n\n// Write TH, TL and CONFIG to scratchpad bytes 2..4 (p.14). All three must be sent before a reset.\nbool ds18b20WriteConfig(uint8_t th, uint8_t tl, uint8_t cfg) {\n  if (!owReset()) return false;\n  owWriteByte(CMD_SKIP_ROM);\n  owWriteByte(CMD_WRITE_SCRATCHPAD);\n  owWriteByte(th);\n  owWriteByte(tl);\n  owWriteByte(cfg);\n  return true;\n}\n\n// Start a conversion and wait for it to finish (p.14 Convert T, p.19 note 1)\nbool ds18b20Convert() {\n  if (!owReset()) return false;\n  owWriteByte(CMD_SKIP_ROM);\n  owWriteByte(CMD_CONVERT_T);\n  if (parasitePowered) {\n    // Strong pull-up: drive DQ high for > tconv (p.3, p.19 note 1). ESP32 GPIO can supply the 1.5 mA needed.\n    pinMode(DS18B20_DQ, OUTPUT);\n    digitalWrite(DS18B20_DQ, HIGH);\n    delay(TCONV_12BIT_MS);\n    owRelease();\n  } else {\n    // Externally powered: device answers 0 on read slots while busy, 1 when done (p.14)\n    uint32_t start = millis();\n    while (owReadBit() == 0) {\n      if (millis() - start > TCONV_12BIT_MS + 50) return false;\n      delay(5);\n    }\n  }\n  return true;\n}\n\n// Read the 9-byte scratchpad and verify its CRC (p.8, p.14, Table 5 p.22)\nbool ds18b20ReadScratchpad(uint8_t sp[9]) {\n  if (!owReset()) return false;\n  owWriteByte(CMD_SKIP_ROM);\n  owWriteByte(CMD_READ_SCRATCHPAD);\n  for (int i = 0; i < 9; i++) sp[i] = owReadByte();\n  return owCrc8(sp, 8) == sp[8];\n}\n\n// Convert scratchpad bytes 0 (LSB) and 1 (MSB) to degrees C.\n// 16-bit sign-extended two's complement, LSB = 2^-4 = 0.0625 C at 12-bit (p.5 Table 2).\nfloat ds18b20RawToCelsius(uint8_t lsb, uint8_t msb) {\n  int16_t raw = (int16_t)(((uint16_t)msb << 8) | lsb);\n  return raw / 16.0f;\n}\n\nvoid setup() {\n  Serial.begin(115200);\n  delay(200);\n  owRelease();                     // bus idles high via the pull-up (p.10)\n  Serial.println(\"DS18B20 on ESP32 (GPIO16)\");\n\n  if (!owReset()) {\n    Serial.println(\"ERROR: no presence pulse. Check wiring and 4.7k pull-up on DQ.\");\n  }\n\n  // Read ROM [33h]: family code, 48-bit serial, CRC (single device only, p.11)\n  uint8_t rom[8];\n  if (owReset()) {\n    owWriteByte(CMD_READ_ROM);\n    for (int i = 0; i < 8; i++) rom[i] = owReadByte();\n    Serial.print(\"ROM: \");\n    for (int i = 0; i < 8; i++) {\n      if (rom[i] < 0x10) Serial.print('0');\n      Serial.print(rom[i], HEX);\n      Serial.print(' ');\n    }\n    Serial.println();\n    if (rom[0] != DS18B20_FAMILY_CODE) Serial.println(\"WARNING: family code is not 0x28\");\n    if (owCrc8(rom, 7) != rom[7]) Serial.println(\"WARNING: ROM CRC mismatch\");\n  }\n\n  // Detect power mode so we know whether a strong pull-up is required (p.4)\n  parasitePowered = owReadPowerSupply();\n  Serial.print(\"Power mode: \");\n  Serial.println(parasitePowered ? \"parasite (DQ strong pull-up used)\" : \"external VDD\");\n\n  // Set 12-bit resolution in the volatile scratchpad config (factory default is already 12-bit, p.9)\n  if (ds18b20WriteConfig(TH_DEFAULT, TL_DEFAULT, CONFIG_12BIT)) {\n    Serial.println(\"Configured 12-bit resolution (CONFIG = 0x7F)\");\n  }\n}\n\nvoid loop() {\n  uint8_t sp[9];\n  if (!ds18b20Convert()) {\n    Serial.println(\"Conversion failed / timeout\");\n  } else if (!ds18b20ReadScratchpad(sp)) {\n    Serial.println(\"Scratchpad CRC error, retrying\");\n  } else {\n    float tc = ds18b20RawToCelsius(sp[0], sp[1]);\n    float tf = tc * 9.0f / 5.0f + 32.0f;   // datasheet says host must convert to Fahrenheit (p.5)\n    Serial.print(\"Temperature: \");\n    Serial.print(tc, 4);\n    Serial.print(\" C  (\");\n    Serial.print(tf, 3);\n    Serial.print(\" F)  raw=0x\");\n    uint16_t raw = ((uint16_t)sp[1] << 8) | sp[0];\n    if (raw < 0x1000) Serial.print('0');\n    if (raw < 0x100) Serial.print('0');\n    if (raw < 0x10) Serial.print('0');\n    Serial.print(raw, HEX);\n    Serial.print(\"  config=0x\");\n    Serial.println(sp[4], HEX);\n    if (raw == 0x0550) Serial.println(\"Note: 0x0550 (+85 C) is the power-on reset value; conversion may not have run (p.5)\");\n  }\n  delay(1000);\n}\n",
+    "warnings": [
+      "DQ is open-drain and REQUIRES an external ~4.7k (approx. 5k) pull-up resistor to 3V3; without it there is no presence pulse and no communication (p.4, p.10).",
+      "Power VDD from 3V3, not 5V: DQ idle level equals the pull-up supply, and the ESP32 GPIO is not 5V tolerant. The DS18B20 itself works from 3.0V to 5.5V (p.24).",
+      "If you use parasite power (VDD tied to GND), the master must drive DQ strongly high within 10 us after Convert T for > 750 ms and after Copy Scratchpad for >= 10 ms; the datasheet recommends a MOSFET strong pull-up. The sketch drives the GPIO high which is adequate for a single sensor. Parasite power is not recommended above 100 C (p.3, p.19).",
+      "12-bit conversion takes up to 750 ms (9-bit: 93.75 ms). No other bus activity is allowed during a parasite-powered conversion (p.9, p.19).",
+      "A reading of 0x0550 (+85 C) is the power-on reset value and indicates the conversion did not complete (p.5).",
+      "The bit-banged 1-Wire timing is microsecond-critical; the driver disables interrupts around each time slot. Keep the DQ wire short (or reduce pull-up value for long runs) to keep the rise time within the 15 us read window (p.19, p.21).",
+      "Skip ROM (0xCC) and Read ROM (0x33) are only valid with ONE DS18B20 on the bus; for multiple sensors use Search ROM (0xF0) and Match ROM (0x55) with each 64-bit ROM code (p.11).",
+      "Do not copy the scratchpad to EEPROM (0x48) every boot; the EEPROM is rated for 50,000 writes (p.8, p.24). This sketch only writes the volatile scratchpad.",
+      "Accuracy is +/-0.5 C only from -10 C to +85 C; +/-2 C over the full -55 C to +125 C range (p.24).",
+      "GPIO16 is a general-purpose pin on the ESP32 DevKit; if you move DQ, avoid input-only pins GPIO34-39 (cannot drive low), GPIO6-11 (flash) and strapping pins 0, 2, 5, 12, 15."
+    ],
+    "source_pages": {
+      "part_name": 1,
+      "description": 1,
+      "interface": 1,
+      "operating_voltage": 24,
+      "logic_voltage": 24,
+      "i2c_address": 1,
+      "pins": 2,
+      "init_sequence": 14
+    }
+  },
+  "violations": [],
+  "autoCorrected": false,
+  "corrections": [],
+  "originalViolations": []
+}

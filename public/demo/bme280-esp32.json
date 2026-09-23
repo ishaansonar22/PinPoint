@@ -1,0 +1,110 @@
+{
+  "board": "esp32-devkit",
+  "spec": {
+    "part_name": "BME280",
+    "description": "Combined digital humidity, pressure and temperature sensor from Bosch Sensortec with I2C and SPI interfaces and on-chip compensation coefficients.",
+    "interface": "I2C",
+    "operating_voltage": "1.71V to 3.6V",
+    "logic_voltage": "1.2V to 3.6V",
+    "i2c_address": "0x76",
+    "pins": [
+      {
+        "sensor_pin": "VDD",
+        "board_pin": "3V3",
+        "direction": "power",
+        "uses_adc": false,
+        "note": "Main supply, 1.71–3.6 V."
+      },
+      {
+        "sensor_pin": "VDDIO",
+        "board_pin": "3V3",
+        "direction": "power",
+        "uses_adc": false,
+        "note": "Interface supply for the digital I/O."
+      },
+      {
+        "sensor_pin": "GND",
+        "board_pin": "GND",
+        "direction": "ground",
+        "uses_adc": false,
+        "note": "Ground."
+      },
+      {
+        "sensor_pin": "SCK",
+        "board_pin": "GPIO22",
+        "direction": "output",
+        "uses_adc": false,
+        "note": "I2C clock (SCL). Board default."
+      },
+      {
+        "sensor_pin": "SDI",
+        "board_pin": "GPIO21",
+        "direction": "bidirectional",
+        "uses_adc": false,
+        "note": "I2C data (SDA). Board default. Most breakouts include 10 kΩ pull-ups."
+      },
+      {
+        "sensor_pin": "CSB",
+        "board_pin": "3V3",
+        "direction": "power",
+        "uses_adc": false,
+        "note": "Tie high to select I2C mode; must not be pulled low once I2C is in use."
+      },
+      {
+        "sensor_pin": "SDO",
+        "board_pin": "GND",
+        "direction": "ground",
+        "uses_adc": false,
+        "note": "Sets I2C address LSB: GND = 0x76, VDDIO = 0x77. Do not leave floating."
+      }
+    ],
+    "init_sequence": [
+      {
+        "register": "0xE0 reset",
+        "value": "0xB6",
+        "purpose": "Soft reset to power-on state",
+        "source_page": 27
+      },
+      {
+        "register": "0xF2 ctrl_hum",
+        "value": "0x01",
+        "purpose": "Humidity oversampling ×1 (write before ctrl_meas)",
+        "source_page": 28
+      },
+      {
+        "register": "0xF4 ctrl_meas",
+        "value": "0x27",
+        "purpose": "Temperature ×1, pressure ×1, normal mode",
+        "source_page": 29
+      },
+      {
+        "register": "0xF5 config",
+        "value": "0xA0",
+        "purpose": "Standby 1000 ms, IIR filter off",
+        "source_page": 30
+      }
+    ],
+    "driver_code": "/*\n * BME280 temperature / pressure / humidity driver — ESP32 DevKit (I2C)\n * Datasheet: Bosch BST-BME280-DS002\n *\n * Wiring (sensor pin -> board pin):\n *   VDD   -> 3V3\n *   VDDIO -> 3V3\n *   GND   -> GND\n *   SCK   -> GPIO22 (I2C SCL)\n *   SDI   -> GPIO21 (I2C SDA)\n *   CSB   -> 3V3    (high selects the I2C interface, p.31)\n *   SDO   -> GND    (address 0x76; tie to VDDIO for 0x77, p.32)\n *\n * Uses only Wire.h. Compensation formulas are the 32/64-bit integer versions\n * from datasheet section 4.2.3 (p.25-26).\n */\n\n#include <Wire.h>\n\nconst int I2C_SDA_PIN = 21;\nconst int I2C_SCL_PIN = 22;\nconst uint8_t BME280_ADDR = 0x76;      // SDO tied to GND (p.32)\n\n// Register map (p.27)\nconst uint8_t REG_CALIB00  = 0x88;     // dig_T1 .. dig_P9, dig_H1 (0x88-0xA1)\nconst uint8_t REG_ID       = 0xD0;     // chip id, reads 0x60\nconst uint8_t REG_RESET    = 0xE0;     // write 0xB6 for soft reset\nconst uint8_t REG_CALIB26  = 0xE1;     // dig_H2 .. dig_H6 (0xE1-0xE7)\nconst uint8_t REG_CTRL_HUM = 0xF2;\nconst uint8_t REG_STATUS   = 0xF3;\nconst uint8_t REG_CTRL_MEAS= 0xF4;\nconst uint8_t REG_CONFIG   = 0xF5;\nconst uint8_t REG_DATA     = 0xF7;     // press_msb .. hum_lsb, 8 bytes\n\n// Trimming parameters (table 16, p.24)\nuint16_t dig_T1; int16_t dig_T2, dig_T3;\nuint16_t dig_P1; int16_t dig_P2, dig_P3, dig_P4, dig_P5, dig_P6, dig_P7, dig_P8, dig_P9;\nuint8_t  dig_H1, dig_H3; int16_t dig_H2, dig_H4, dig_H5; int8_t dig_H6;\n\nint32_t t_fine;   // shared between compensation functions (p.25)\n\nvoid writeReg(uint8_t reg, uint8_t value) {\n  Wire.beginTransmission(BME280_ADDR);\n  Wire.write(reg);\n  Wire.write(value);\n  Wire.endTransmission();\n}\n\nvoid readRegs(uint8_t reg, uint8_t *buf, uint8_t len) {\n  Wire.beginTransmission(BME280_ADDR);\n  Wire.write(reg);\n  Wire.endTransmission(false);           // repeated start (p.33)\n  Wire.requestFrom(BME280_ADDR, len);\n  for (uint8_t i = 0; i < len && Wire.available(); i++) buf[i] = Wire.read();\n}\n\nuint8_t readReg(uint8_t reg) {\n  uint8_t v = 0;\n  readRegs(reg, &v, 1);\n  return v;\n}\n\nvoid readCalibration() {\n  uint8_t c[26];\n  readRegs(REG_CALIB00, c, 26);\n  dig_T1 = (uint16_t)(c[1] << 8 | c[0]);\n  dig_T2 = (int16_t)(c[3] << 8 | c[2]);\n  dig_T3 = (int16_t)(c[5] << 8 | c[4]);\n  dig_P1 = (uint16_t)(c[7] << 8 | c[6]);\n  dig_P2 = (int16_t)(c[9] << 8 | c[8]);\n  dig_P3 = (int16_t)(c[11] << 8 | c[10]);\n  dig_P4 = (int16_t)(c[13] << 8 | c[12]);\n  dig_P5 = (int16_t)(c[15] << 8 | c[14]);\n  dig_P6 = (int16_t)(c[17] << 8 | c[16]);\n  dig_P7 = (int16_t)(c[19] << 8 | c[18]);\n  dig_P8 = (int16_t)(c[21] << 8 | c[20]);\n  dig_P9 = (int16_t)(c[23] << 8 | c[22]);\n  dig_H1 = c[25];                        // 0xA1\n\n  uint8_t h[7];\n  readRegs(REG_CALIB26, h, 7);\n  dig_H2 = (int16_t)(h[1] << 8 | h[0]);\n  dig_H3 = h[2];\n  dig_H4 = (int16_t)((h[3] << 4) | (h[4] & 0x0F));   // 0xE4[7:0] / 0xE5[3:0]\n  dig_H5 = (int16_t)((h[5] << 4) | (h[4] >> 4));     // 0xE6[7:0] / 0xE5[7:4]\n  dig_H6 = (int8_t)h[6];\n}\n\n// Returns temperature in 0.01 degC (p.25)\nint32_t compensateT(int32_t adc_T) {\n  int32_t var1 = ((((adc_T >> 3) - ((int32_t)dig_T1 << 1))) * ((int32_t)dig_T2)) >> 11;\n  int32_t var2 = (((((adc_T >> 4) - ((int32_t)dig_T1)) * ((adc_T >> 4) - ((int32_t)dig_T1))) >> 12) *\n                  ((int32_t)dig_T3)) >> 14;\n  t_fine = var1 + var2;\n  return (t_fine * 5 + 128) >> 8;\n}\n\n// Returns pressure in Pa as Q24.8 (divide by 256) (p.25-26)\nuint32_t compensateP(int32_t adc_P) {\n  int64_t var1 = ((int64_t)t_fine) - 128000;\n  int64_t var2 = var1 * var1 * (int64_t)dig_P6;\n  var2 = var2 + ((var1 * (int64_t)dig_P5) << 17);\n  var2 = var2 + (((int64_t)dig_P4) << 35);\n  var1 = ((var1 * var1 * (int64_t)dig_P3) >> 8) + ((var1 * (int64_t)dig_P2) << 12);\n  var1 = (((((int64_t)1) << 47) + var1)) * ((int64_t)dig_P1) >> 33;\n  if (var1 == 0) return 0;               // avoid divide by zero\n  int64_t p = 1048576 - adc_P;\n  p = (((p << 31) - var2) * 3125) / var1;\n  var1 = (((int64_t)dig_P9) * (p >> 13) * (p >> 13)) >> 25;\n  var2 = (((int64_t)dig_P8) * p) >> 19;\n  p = ((p + var1 + var2) >> 8) + (((int64_t)dig_P7) << 4);\n  return (uint32_t)p;\n}\n\n// Returns humidity in %RH as Q22.10 (divide by 1024) (p.26)\nuint32_t compensateH(int32_t adc_H) {\n  int32_t v = (t_fine - ((int32_t)76800));\n  v = (((((adc_H << 14) - (((int32_t)dig_H4) << 20) - (((int32_t)dig_H5) * v)) + ((int32_t)16384)) >> 15) *\n       (((((((v * ((int32_t)dig_H6)) >> 10) * (((v * ((int32_t)dig_H3)) >> 11) + ((int32_t)32768))) >> 10) +\n          ((int32_t)2097152)) * ((int32_t)dig_H2) + 8192) >> 14));\n  v = (v - (((((v >> 15) * (v >> 15)) >> 7) * ((int32_t)dig_H1)) >> 4));\n  v = (v < 0 ? 0 : v);\n  v = (v > 419430400 ? 419430400 : v);\n  return (uint32_t)(v >> 12);\n}\n\nvoid setup() {\n  Serial.begin(115200);\n  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);\n  Wire.setClock(400000);                 // fast mode supported (p.32)\n\n  uint8_t id = readReg(REG_ID);\n  if (id != 0x60) {\n    Serial.print(\"BME280 not found, id=0x\"); Serial.println(id, HEX);\n    while (true) delay(1000);\n  }\n\n  writeReg(REG_RESET, 0xB6);             // soft reset (p.27)\n  delay(10);                             // start-up time 2 ms (p.6)\n  while (readReg(REG_STATUS) & 0x01) delay(1);   // wait for NVM copy (im_update)\n\n  readCalibration();\n\n  // Init sequence: ctrl_hum must be written before ctrl_meas (p.28)\n  writeReg(REG_CTRL_HUM, 0x01);          // humidity oversampling x1\n  writeReg(REG_CTRL_MEAS, 0x27);         // temp x1, press x1, normal mode (p.29)\n  writeReg(REG_CONFIG, 0xA0);            // t_standby 1000 ms, IIR filter off (p.30)\n\n  Serial.println(\"BME280 ready\");\n}\n\nvoid loop() {\n  uint8_t d[8];\n  readRegs(REG_DATA, d, 8);              // burst read 0xF7..0xFE (p.31)\n  int32_t adc_P = ((int32_t)d[0] << 12) | ((int32_t)d[1] << 4) | (d[2] >> 4);\n  int32_t adc_T = ((int32_t)d[3] << 12) | ((int32_t)d[4] << 4) | (d[5] >> 4);\n  int32_t adc_H = ((int32_t)d[6] << 8) | d[7];\n\n  float tempC = compensateT(adc_T) / 100.0f;      // call first: sets t_fine\n  float pressPa = compensateP(adc_P) / 256.0f;\n  float humRH = compensateH(adc_H) / 1024.0f;\n\n  Serial.print(\"T = \"); Serial.print(tempC, 2); Serial.print(\" C  \");\n  Serial.print(\"P = \"); Serial.print(pressPa / 100.0f, 2); Serial.print(\" hPa  \");\n  Serial.print(\"RH = \"); Serial.print(humRH, 2); Serial.println(\" %\");\n\n  delay(1000);\n}\n",
+    "warnings": [
+      "The BME280 is a 3.3 V device: never connect VDD or any signal to 5 V.",
+      "The SDO pin selects the I2C address (GND → 0x76, VDDIO → 0x77) and must not be left floating.",
+      "Humidity settings in ctrl_hum only take effect after the next write to ctrl_meas.",
+      "In normal mode with these settings the sensor updates once per second; read all 8 data registers in one burst to avoid mixing samples."
+    ],
+    "source_pages": {
+      "part_name": 1,
+      "description": 1,
+      "interface": 31,
+      "operating_voltage": 6,
+      "logic_voltage": 6,
+      "i2c_address": 32,
+      "pins": 36,
+      "init_sequence": 27
+    }
+  },
+  "violations": [],
+  "autoCorrected": false,
+  "corrections": [],
+  "originalViolations": [],
+  "elapsedMs": 0
+}

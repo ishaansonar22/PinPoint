@@ -1,0 +1,62 @@
+{
+  "board": "esp32-devkit",
+  "spec": {
+    "part_name": "LED Module (3-pin, red)",
+    "description": "Breakout module with a single 5 mm red LED and a series current-limiting resistor. Drive the S pin high to light the LED.",
+    "interface": "GPIO",
+    "operating_voltage": "3.3V to 5V",
+    "logic_voltage": "3.3V to 5V",
+    "i2c_address": null,
+    "init_sequence": [],
+    "warnings": [
+      "The middle '+' pin is not connected on most 3-pin LED modules; leave it floating.",
+      "Do not remove the series resistor: the LED would draw more than the 12 mA the ESP32 GPIO can source."
+    ],
+    "source_pages": {
+      "part_name": 1,
+      "description": 1,
+      "interface": 1,
+      "operating_voltage": 1,
+      "logic_voltage": 1,
+      "pins": 2
+    },
+    "pins": [
+      {
+        "sensor_pin": "S",
+        "board_pin": "GPIO26",
+        "direction": "output",
+        "uses_adc": false,
+        "note": "LED signal; HIGH turns the LED on. Moved from GPIO35 because GPIO35 is input-only on the ESP32 and cannot drive a load."
+      },
+      {
+        "sensor_pin": "-",
+        "board_pin": "GND",
+        "direction": "ground",
+        "uses_adc": false,
+        "note": "Module ground."
+      }
+    ],
+    "driver_code": "/*\n * LED module driver — ESP32 DevKit\n * Part: single-colour LED module with on-board series resistor\n *\n * Wiring (module pin -> board pin):\n *   S  (signal) -> GPIO26   (moved from GPIO35: input-only, cannot drive an LED)\n *   -  (ground) -> GND\n *\n * The on-board resistor (datasheet p.1: 220 Ω typ.) limits LED current to\n * about 8 mA at 3.3 V, well inside the ESP32's default 12 mA per-pin drive.\n */\n\nconst int LED_PIN = 26;\n\nvoid setup() {\n  Serial.begin(115200);\n  pinMode(LED_PIN, OUTPUT);\n  digitalWrite(LED_PIN, LOW);\n  Serial.println(\"LED module ready on GPIO26\");\n}\n\nvoid loop() {\n  // Blink at 1 Hz. Forward voltage ~2.0 V for a red LED (datasheet p.1).\n  digitalWrite(LED_PIN, HIGH);\n  Serial.println(\"LED on\");\n  delay(500);\n\n  digitalWrite(LED_PIN, LOW);\n  Serial.println(\"LED off\");\n  delay(500);\n}\n"
+  },
+  "violations": [],
+  "autoCorrected": true,
+  "corrections": [
+    {
+      "sensor_pin": "S",
+      "original_pin": "GPIO35",
+      "new_pin": "GPIO26",
+      "reason": "GPIO35 is input-only on the ESP32; it cannot drive \"S\" as an output signal. Move it to a general-purpose GPIO such as 25, 26, 27, 32 or 33."
+    }
+  ],
+  "originalViolations": [
+    {
+      "rule_id": "esp32-input-only",
+      "severity": "error",
+      "sensor_pin": "S",
+      "board_pin": "GPIO35",
+      "message": "GPIO35 is input-only on the ESP32; it cannot drive \"S\" as an output signal. Move it to a general-purpose GPIO such as 25, 26, 27, 32 or 33.",
+      "pin_index": 0
+    }
+  ],
+  "elapsedMs": 0
+}
