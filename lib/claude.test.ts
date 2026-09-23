@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeSpec, parseSpecJson, SpecParseError, stripToJson } from "./claude";
+import { normalizeSpec, parseCodeFix, parseSpecJson, SpecParseError, stripToJson } from "./claude";
 
 const valid = {
   part_name: "BME280",
@@ -53,12 +53,31 @@ describe("parseSpecJson / normalizeSpec", () => {
     expect(spec.pins[0].note).toBe("");
   });
 
+  it("normalises the libraries list", () => {
+    expect(normalizeSpec({ ...valid, libraries: ["<Wire.h>", "wire", "SPI.h", " Adafruit BME280 Library "] }).libraries).toEqual([
+      "Wire",
+      "SPI",
+      "Adafruit BME280 Library",
+    ]);
+    expect(normalizeSpec(valid).libraries).toEqual([]);
+  });
+
   it("turns an empty i2c_address into null and defaults optional arrays", () => {
     const spec = normalizeSpec({ ...valid, i2c_address: "", init_sequence: undefined, warnings: undefined, source_pages: undefined });
     expect(spec.i2c_address).toBeNull();
     expect(spec.init_sequence).toEqual([]);
     expect(spec.warnings).toEqual([]);
     expect(spec.source_pages).toEqual({});
+  });
+
+  it("parses compile-fix replies and falls back to the previous library list", () => {
+    const fix = parseCodeFix('```json\n{"driver_code":"#include <Wire.h>\\nvoid setup(){}","change_summary":"Added Wire.h"}\n```', ["Wire"]);
+    expect(fix.driver_code).toContain("#include <Wire.h>");
+    expect(fix.libraries).toEqual(["Wire"]);
+    expect(fix.summary).toBe("Added Wire.h");
+    expect(parseCodeFix('{"driver_code":"x","libraries":["<SPI.h>"]}', []).libraries).toEqual(["SPI"]);
+    expect(() => parseCodeFix('{"driver_code":""}', [])).toThrow(SpecParseError);
+    expect(() => parseCodeFix("nope", [])).toThrow(SpecParseError);
   });
 
   it("throws SpecParseError on invalid JSON", () => {

@@ -8,6 +8,7 @@
     "logic_voltage": "3.3V to 5V",
     "i2c_address": null,
     "init_sequence": [],
+    "libraries": [],
     "warnings": [
       "The middle '+' pin is not connected on most 3-pin LED modules; leave it floating.",
       "Do not remove the series resistor: the LED would draw more than the 12 mA the ESP32 GPIO can source."
@@ -58,5 +59,11 @@
       "pin_index": 0
     }
   ],
-  "elapsedMs": 0
+  "elapsedMs": 0,
+  "compile": {
+    "status": "skipped",
+    "attempts": [],
+    "fixes": [],
+    "message": "Compile check was not run for this demo."
+  }
 }

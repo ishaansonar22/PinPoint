@@ -13,9 +13,26 @@ import path from "node:path";
 import { BOARDS } from "../lib/boards";
 import { diffPins } from "../lib/pipeline";
 import { checkPins } from "../lib/rules";
-import type { BoardId, GenerateResult, PartSpec } from "../lib/types";
+import type { BoardId, CompileCheck, GenerateResult, PartSpec } from "../lib/types";
 
 const OUT_DIR = path.resolve(process.cwd(), "public", "demo");
+const FIXTURES_DIR = path.resolve(process.cwd(), "scripts", "fixtures");
+const RECORDED_DIR = path.resolve(process.cwd(), "scripts", "recorded");
+
+const readFixture = (name: string) => readFileSync(path.join(FIXTURES_DIR, name), "utf8");
+
+/** scripts/recorded/<id>.compile.json holds a real compile-service result for a demo. */
+function recordedCompile(id: string): CompileCheck | null {
+  const file = path.join(RECORDED_DIR, `${id}.compile.json`);
+  return existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as CompileCheck) : null;
+}
+
+const NOT_RUN: CompileCheck = {
+  status: "skipped",
+  attempts: [],
+  fixes: [],
+  message: "Compile check was not run for this demo.",
+};
 
 // ---------------------------------------------------------------------------
 // Demo 1: LED module on ESP32 — Claude first puts the LED on GPIO35, an
@@ -64,6 +81,7 @@ const ledBase: Omit<PartSpec, "pins" | "driver_code"> = {
   logic_voltage: "3.3V to 5V",
   i2c_address: null,
   init_sequence: [],
+  libraries: [],
   warnings: [
     "The middle '+' pin is not connected on most 3-pin LED modules; leave it floating.",
     "Do not remove the series resistor: the LED would draw more than the 12 mA the ESP32 GPIO can source.",
@@ -312,6 +330,7 @@ const bme280: PartSpec = {
     { register: "0xF5 config", value: "0xA0", purpose: "Standby 1000 ms, IIR filter off", source_page: 30 },
   ],
   driver_code: bme280Code,
+  libraries: ["Wire"],
   warnings: [
     "The BME280 is a 3.3 V device: never connect VDD or any signal to 5 V.",
     "The SDO pin selects the I2C address (GND → 0x76, VDDIO → 0x77) and must not be left floating.",
@@ -415,6 +434,7 @@ const mcp3008: PartSpec = {
   ],
   init_sequence: [],
   driver_code: mcp3008Code,
+  libraries: ["SPI"],
   warnings: [
     "Analog inputs must stay between AGND and VREF; add a series resistor or clamp for signals that may exceed 5 V.",
     "Keep the SPI clock at or below 3.6 MHz at 5 V (1.35 MHz at 2.7 V) or conversions lose accuracy.",
@@ -428,6 +448,60 @@ const mcp3008: PartSpec = {
     logic_voltage: 4,
     pins: 13,
   },
+};
+
+// ---------------------------------------------------------------------------
+// Demo 4: SHT31-D on ESP32 — the first sketch forgot `#include <Wire.h>`; the
+// compile-check loop caught it and Claude's fix compiled on the second try.
+// The compiler output is real arduino-cli output for scripts/fixtures/sht31_before.ino.
+// ---------------------------------------------------------------------------
+
+const sht31: PartSpec = {
+  part_name: "SHT31-D",
+  description:
+    "Sensirion digital humidity and temperature sensor with ±2 %RH / ±0.2 °C accuracy, fully calibrated, I2C interface up to 1 MHz.",
+  interface: "I2C",
+  operating_voltage: "2.15V to 5.5V",
+  logic_voltage: "2.15V to 5.5V",
+  i2c_address: "0x44",
+  pins: [
+    { sensor_pin: "VDD", board_pin: "3V3", direction: "power", uses_adc: false, note: "Supply 2.15–5.5 V; 100 nF decoupling close to the pin." },
+    { sensor_pin: "VSS", board_pin: "GND", direction: "ground", uses_adc: false, note: "Ground." },
+    { sensor_pin: "SDA", board_pin: "GPIO21", direction: "bidirectional", uses_adc: false, note: "I2C data. Board default. Pull-up on most breakouts." },
+    { sensor_pin: "SCL", board_pin: "GPIO22", direction: "output", uses_adc: false, note: "I2C clock. Board default." },
+    { sensor_pin: "ADDR", board_pin: "GND", direction: "ground", uses_adc: false, note: "Address select: GND → 0x44, VDD → 0x45. Must not float." },
+    { sensor_pin: "nRESET", board_pin: "3V3", direction: "power", uses_adc: false, note: "Active-low reset; tie high or leave open (internal pull-up)." },
+  ],
+  init_sequence: [
+    { register: "Soft reset", value: "0x30A2", purpose: "Return to default state after power-up", source_page: 12 },
+    { register: "Measurement", value: "0x2400", purpose: "Single shot, clock stretching disabled, high repeatability", source_page: 10 },
+  ],
+  driver_code: readFixture("sht31_after.ino"),
+  libraries: ["Wire"],
+  warnings: [
+    "ADDR must be tied to GND or VDD; leaving it floating gives an undefined I2C address.",
+    "Each measurement's CRC-8 must be checked; the driver discards frames that fail.",
+    "Self-heating: continuous high-repeatability measurements faster than 1 Hz can bias temperature by ~0.1 °C.",
+  ],
+  source_pages: { part_name: 1, description: 1, interface: 10, operating_voltage: 6, logic_voltage: 6, i2c_address: 9, pins: 9, init_sequence: 10 },
+};
+
+const sht31CompileErrors = readFixture("sht31_errors.txt").trim();
+
+const sht31Compile: CompileCheck = {
+  status: "fixed",
+  attempts: [
+    { attempt: 1, success: false, errors: sht31CompileErrors, warnings: "", duration_ms: 1340 },
+    { attempt: 2, success: true, errors: "", warnings: "", duration_ms: 9720 },
+  ],
+  fixes: [
+    {
+      attempt: 1,
+      errors: sht31CompileErrors,
+      summary:
+        "Added `#include <Wire.h>` at the top of the sketch so the Wire I2C object is declared. No pins, commands or formulas were changed.",
+    },
+  ],
 };
 
 // ---------------------------------------------------------------------------
@@ -466,26 +540,33 @@ const demos: Record<string, GenerateResult> = {
   "esp32-led-autocorrect": corrected("esp32-devkit", ledBefore, ledAfter),
   "bme280-esp32": clean("esp32-devkit", bme280),
   "mcp3008-uno": clean("arduino-uno", mcp3008),
+  "sht31-esp32-compilefix": { ...clean("esp32-devkit", sht31), compile: sht31Compile },
 };
 
 // ---------------------------------------------------------------------------
-// Recorded real runs: scripts/recorded/*.json holds GenerateResult objects
+// Recorded real runs: scripts/recorded/<id>.json holds GenerateResult objects
 // captured from the live API. The spec is kept verbatim; the rules-engine
 // output is recomputed so it always reflects the current rules table.
 // ---------------------------------------------------------------------------
 
-const RECORDED_DIR = path.resolve(process.cwd(), "scripts", "recorded");
 if (existsSync(RECORDED_DIR)) {
-  for (const file of readdirSync(RECORDED_DIR).filter((f) => f.endsWith(".json"))) {
+  for (const file of readdirSync(RECORDED_DIR).filter((f) => f.endsWith(".json") && !f.endsWith(".compile.json"))) {
     const id = file.replace(/\.json$/, "");
     const recorded = JSON.parse(readFileSync(path.join(RECORDED_DIR, file), "utf8")) as GenerateResult;
-    const violations = checkPins(recorded.board, recorded.spec);
+    const spec: PartSpec = { ...recorded.spec, libraries: recorded.spec.libraries ?? [] };
+    const violations = checkPins(recorded.board, spec);
     demos[id] = {
       ...recorded,
+      spec,
       violations,
       originalViolations: recorded.autoCorrected ? recorded.originalViolations : violations,
     };
   }
+}
+
+// Attach compile results: a recorded real result when one exists, else "not run".
+for (const [id, result] of Object.entries(demos)) {
+  if (!result.compile) result.compile = recordedCompile(id) ?? NOT_RUN;
 }
 
 mkdirSync(OUT_DIR, { recursive: true });
@@ -495,7 +576,7 @@ for (const [id, result] of Object.entries(demos)) {
   const e = result.violations.filter((v) => v.severity === "error").length;
   const w = result.violations.filter((v) => v.severity === "warning").length;
   console.log(
-    `${id}: ${e} error(s), ${w} warning(s), ${result.corrections.length} correction(s)` +
+    `${id}: ${e} error(s), ${w} warning(s), ${result.corrections.length} correction(s), compile=${result.compile?.status}` +
       (result.autoCorrected ? ` [auto-corrected from ${result.originalViolations.length} violation(s)]` : ""),
   );
 }

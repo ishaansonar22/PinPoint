@@ -5,7 +5,9 @@ import { PrismLight as SyntaxHighlighter } from "react-syntax-highlighter";
 import cpp from "react-syntax-highlighter/dist/esm/languages/prism/cpp";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import type { BoardDef } from "@/lib/boards";
+import type { CompileCheck } from "@/lib/types";
 import { Badge, Card, SectionTitle } from "../ui";
+import { CompileBadge } from "./CompileCheck";
 
 SyntaxHighlighter.registerLanguage("cpp", cpp);
 
@@ -13,10 +15,14 @@ export default function DriverCode({
   code,
   partName,
   board,
+  libraries = [],
+  compile,
 }: {
   code: string;
   partName: string;
   board: BoardDef;
+  libraries?: string[];
+  compile?: CompileCheck;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -58,8 +64,14 @@ export default function DriverCode({
     <Card className="overflow-hidden">
       <SectionTitle
         right={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Badge>Arduino · {board.shortName}</Badge>
+            {libraries.map((l) => (
+              <Badge key={l} tone="accent" title="Library required by the sketch">
+                {l}
+              </Badge>
+            ))}
+            {compile && compile.status !== "skipped" && <CompileBadge compile={compile} />}
             <span className="text-[11px] text-ink-400">{lines} lines</span>
             <button
               type="button"

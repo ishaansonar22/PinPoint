@@ -74,6 +74,7 @@ export const SCHEMA_TEXT = `{
     { "register": string, "value": string, "purpose": string, "source_page": number }
   ],
   "driver_code": string,
+  "libraries": [string],
   "warnings": [string],
   "source_pages": { [field: string]: number }
 }`;
@@ -93,6 +94,7 @@ Field guidance:
 - pins: one entry for every part pin that must be connected: power, ground, and every signal the driver uses. Include a pin the driver does not use only when the datasheet requires it to be tied (e.g. CSB pulled high to select I2C), and say so in the note. sensor_pin is the name printed in the datasheet. board_pin uses this board's naming exactly as described below. direction is from the board's point of view (the board drives an "output", reads an "input"). uses_adc is true only for analog signals the board reads with analogRead.
 - init_sequence: the register writes or commands sent at start-up, in order, each with the datasheet page that documents it. Use an empty array for parts without registers.
 - driver_code: a complete, compilable Arduino sketch with setup() and loop() for the target board. Use only the core libraries that ship with the board package (Wire, SPI, etc.), implement register access yourself from the datasheet, and carry over any compensation or conversion formulas the datasheet gives. Define every pin as a named constant that matches the pins array exactly. Comment the code, citing datasheet pages for register values. Print readings over Serial.
+- libraries: every Arduino library the sketch #includes, by Library Manager name, e.g. ["Wire"], ["SPI"], ["Wire", "Adafruit BME280 Library"]. Core libraries (Wire, SPI, EEPROM, SoftwareSerial, WiFi) are always fine; prefer them and avoid third-party libraries unless the part is impractical to drive without one.
 - warnings: anything the user must know before powering up: voltage limits, pull-ups, address-select pins, timing, calibration.
 - source_pages: map each of part_name, description, interface, operating_voltage, logic_voltage, i2c_address, pins and init_sequence to the 1-based PDF page number where you found the value. Every extracted value must cite a page; use the page of the pinout table for pins.
 
@@ -261,6 +263,21 @@ function normalizeInit(raw: unknown, i: number): InitStep {
   };
 }
 
+function normalizeLibraries(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  for (const item of v) {
+    const s = String(item ?? "")
+      .trim()
+      .replace(/^[<"]/, "")
+      .replace(/[>"]$/, "")
+      .replace(/\.h$/i, "")
+      .trim();
+    if (s && !out.some((x) => x.toLowerCase() === s.toLowerCase())) out.push(s);
+  }
+  return out;
+}
+
 /** Validate and normalise an untyped parsed object into a PartSpec. */
 export function normalizeSpec(raw: unknown): PartSpec {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
@@ -293,6 +310,7 @@ export function normalizeSpec(raw: unknown): PartSpec {
     pins: pinsRaw.map(normalizePin),
     init_sequence: Array.isArray(o.init_sequence) ? o.init_sequence.map(normalizeInit) : [],
     driver_code: str(o.driver_code, "driver_code"),
+    libraries: normalizeLibraries(o.libraries),
     warnings: Array.isArray(o.warnings) ? o.warnings.map((w) => String(w)) : [],
     source_pages: sourcePages,
   };
@@ -400,4 +418,83 @@ Fix every ERROR by moving the affected signals to valid board pins. Prefer these
 Return the complete corrected JSON object only.`;
 
   return askForSpec(system, (suffix) => [{ type: "text", text: text + suffix }], log, "correct");
+}
+
+// ---------------------------------------------------------------------------
+// Compile-error fixes
+// ---------------------------------------------------------------------------
+
+export interface CodeFix {
+  driver_code: string;
+  libraries: string[];
+  summary: string;
+}
+
+/** Parse the small JSON object returned by fixCompileErrors. */
+export function parseCodeFix(text: string, fallbackLibraries: string[]): CodeFix {
+  const json = stripToJson(text);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch (e) {
+    throw new SpecParseError(`invalid JSON: ${(e as Error).message}`, text);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new SpecParseError("schema mismatch: top level must be a JSON object", text);
+  }
+  const o = parsed as Record<string, unknown>;
+  if (typeof o.driver_code !== "string" || o.driver_code.trim() === "") {
+    throw new SpecParseError('schema mismatch: "driver_code" must be a non-empty string', text);
+  }
+  const libs = Array.isArray(o.libraries) ? normalizeLibraries(o.libraries) : fallbackLibraries;
+  return {
+    driver_code: o.driver_code,
+    libraries: libs,
+    summary: typeof o.change_summary === "string" ? o.change_summary.trim() : "",
+  };
+}
+
+/**
+ * Ask Claude to fix compiler errors in driver_code without touching wiring.
+ * Returns only the new code, the library list and a summary of the change.
+ */
+export async function fixCompileErrors(
+  spec: PartSpec,
+  compilerErrors: string,
+  board: BoardDef,
+  attempt: number,
+  log: Logger = noop,
+): Promise<CodeFix> {
+  const system = `You are PinPoint's compile-fix assistant. You receive an Arduino sketch for the ${board.name} that failed to compile with arduino-cli, plus the compiler output. Fix the code so it compiles, changing as little as possible and keeping the pin assignments, register values and behaviour exactly the same.
+
+Respond with a single JSON object and nothing else (no markdown fences, no commentary):
+{
+  "driver_code": string,      // the complete corrected sketch
+  "libraries": [string],      // every library the corrected sketch #includes, by Library Manager name
+  "change_summary": string    // one or two sentences describing what you changed and why
+}
+
+Board and toolchain notes: ${board.codeHints} Only libraries that ship with the board core or are on the Arduino Library Manager are available; if an include cannot be satisfied, rewrite the code to avoid it.`;
+
+  const text = `Fix attempt ${attempt}. The sketch below failed to compile.
+
+Compiler output:
+${compilerErrors}
+
+Libraries currently listed: ${spec.libraries.length ? spec.libraries.join(", ") : "(none)"}
+
+Sketch:
+${spec.driver_code}`;
+
+  const first = await callClaude(system, [{ type: "text", text }], log);
+  log(`[fix ${attempt}] raw response (attempt 1)`, first);
+  try {
+    return parseCodeFix(first, spec.libraries);
+  } catch (e) {
+    if (!(e instanceof SpecParseError)) throw e;
+    log(`[fix ${attempt}] parse failed, retrying: ${e.message}`);
+    const second = await callClaude(system, [{ type: "text", text: text + STRICT_RETRY_SUFFIX(e.message) }], log);
+    log(`[fix ${attempt}] raw response (attempt 2)`, second);
+    return parseCodeFix(second, spec.libraries);
+  }
 }

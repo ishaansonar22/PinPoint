@@ -7,4 +7,5 @@ out
 next-env.d.ts
 .DS_Store
 .screens
+compile-service/dist
 npm-debug.log*

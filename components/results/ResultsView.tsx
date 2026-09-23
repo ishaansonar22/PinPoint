@@ -3,6 +3,7 @@
 import { BOARDS } from "@/lib/boards";
 import type { GenerateResult } from "@/lib/types";
 import { Badge } from "../ui";
+import CompileCheck, { CompileBadge } from "./CompileCheck";
 import DriverCode from "./DriverCode";
 import PartSummary from "./PartSummary";
 import RulesPanel from "./RulesPanel";
@@ -25,6 +26,7 @@ export default function ResultsView({ result }: { result: GenerateResult }) {
         {errors === 0 && warnings === 0 && <Badge tone="success">All checks passed ✓</Badge>}
         {errors > 0 && <Badge tone="error">{errors} error{errors === 1 ? "" : "s"}</Badge>}
         {warnings > 0 && <Badge tone="warning">{warnings} warning{warnings === 1 ? "" : "s"}</Badge>}
+        <CompileBadge compile={result.compile} />
         {typeof result.elapsedMs === "number" && !result.demo && (
           <span className="ml-auto">{(result.elapsedMs / 1000).toFixed(1)}s</span>
         )}
@@ -42,7 +44,15 @@ export default function ResultsView({ result }: { result: GenerateResult }) {
         <RulesPanel result={result} board={board} />
       </div>
 
-      <DriverCode code={result.spec.driver_code} partName={result.spec.part_name} board={board} />
+      <DriverCode
+        code={result.spec.driver_code}
+        partName={result.spec.part_name}
+        board={board}
+        libraries={result.spec.libraries ?? []}
+        compile={result.compile}
+      />
+
+      <CompileCheck compile={result.compile} board={board} />
 
       <WarningsList warnings={result.spec.warnings} initSequence={result.spec.init_sequence} />
     </div>

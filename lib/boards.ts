@@ -21,11 +21,16 @@ export interface PinRef {
   raw: string;
 }
 
+/** Board identifiers understood by the compile service. */
+export type CompileTarget = "esp32" | "uno";
+
 export interface BoardDef {
   id: BoardId;
   name: string;
   /** e.g. "ESP32" - used in prompts and copy. */
   shortName: string;
+  /** Which toolchain the compile service should use. */
+  compileTarget: CompileTarget;
   logicVoltage: number;
   /** Canonical labels for default I2C pins. */
   i2c: { sda: string; scl: string };
@@ -99,6 +104,7 @@ export const ESP32_DEVKIT: BoardDef = {
   id: "esp32-devkit",
   name: "ESP32 DevKit",
   shortName: "ESP32",
+  compileTarget: "esp32",
   logicVoltage: 3.3,
   i2c: { sda: "GPIO21", scl: "GPIO22" },
   spi: { ss: "GPIO5", mosi: "GPIO23", miso: "GPIO19", sck: "GPIO18" },
@@ -168,6 +174,7 @@ export const ARDUINO_UNO: BoardDef = {
   id: "arduino-uno",
   name: "Arduino Uno",
   shortName: "Uno",
+  compileTarget: "uno",
   logicVoltage: 5,
   i2c: { sda: "A4", scl: "A5" },
   spi: { ss: "D10", mosi: "D11", miso: "D12", sck: "D13" },

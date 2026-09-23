@@ -87,7 +87,8 @@
       "i2c_address": 11,
       "pins": 3,
       "init_sequence": 17
-    }
+    },
+    "libraries": []
   },
   "violations": [
     {
@@ -110,5 +111,19 @@
       "message": "The part's logic level is \"Referenced to V+; VIH = 0.7 x V+ min, absolute maximum 4V on SCL/SDA/ADD0 - not 5V tolerant\", but the Arduino Uno drives 5V on its GPIO. Use a bidirectional logic level shifter (e.g. TXS0108E or a BSS138 breakout) between the Uno and the part, and power the part from the 3.3V pin.",
       "pin_index": -1
     }
-  ]
+  ],
+  "compile": {
+    "status": "passed",
+    "attempts": [
+      {
+        "attempt": 1,
+        "success": true,
+        "errors": "",
+        "warnings": "",
+        "duration_ms": 1736
+      }
+    ],
+    "fixes": [],
+    "fqbn": "arduino:avr:uno"
+  }
 }

@@ -32,6 +32,12 @@ export const DEMOS: DemoEntry[] = [
     file: "/demo/mcp3008-uno.json",
   },
   {
+    id: "sht31-esp32-compilefix",
+    title: "SHT31-D on ESP32",
+    subtitle: "Compile-check loop: missing #include <Wire.h> fixed automatically",
+    file: "/demo/sht31-esp32-compilefix.json",
+  },
+  {
     id: "ds18b20-esp32",
     title: "DS18B20 on ESP32 (real run)",
     subtitle: "1-Wire thermometer, bit-banged driver — recorded live output",

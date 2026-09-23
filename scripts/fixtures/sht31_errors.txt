@@ -1,0 +1,12 @@
+sketch.ino:27:3: error: 'Wire' was not declared in this scope
+   Wire.beginTransmission(SHT31_ADDR);
+   ^~~~
+sketch.ino:50:7: error: 'Wire' was not declared in this scope
+   if (Wire.requestFrom(SHT31_ADDR, (uint8_t)6) != 6) return false;
+       ^~~~
+sketch.ino:51:38: error: 'Wire' was not declared in this scope
+   for (int i = 0; i < 6; i++) d[i] = Wire.read();
+                                      ^~~~
+sketch.ino:63:3: error: 'Wire' was not declared in this scope
+   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+Error during build: exit status 1

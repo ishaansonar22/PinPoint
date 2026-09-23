@@ -17,6 +17,7 @@ const base: PartSpec = {
   ],
   init_sequence: [],
   driver_code: "void setup(){} void loop(){}",
+  libraries: [],
   warnings: [],
   source_pages: {},
 };

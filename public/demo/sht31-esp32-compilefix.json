@@ -1,0 +1,119 @@
+{
+  "board": "esp32-devkit",
+  "spec": {
+    "part_name": "SHT31-D",
+    "description": "Sensirion digital humidity and temperature sensor with ±2 %RH / ±0.2 °C accuracy, fully calibrated, I2C interface up to 1 MHz.",
+    "interface": "I2C",
+    "operating_voltage": "2.15V to 5.5V",
+    "logic_voltage": "2.15V to 5.5V",
+    "i2c_address": "0x44",
+    "pins": [
+      {
+        "sensor_pin": "VDD",
+        "board_pin": "3V3",
+        "direction": "power",
+        "uses_adc": false,
+        "note": "Supply 2.15–5.5 V; 100 nF decoupling close to the pin."
+      },
+      {
+        "sensor_pin": "VSS",
+        "board_pin": "GND",
+        "direction": "ground",
+        "uses_adc": false,
+        "note": "Ground."
+      },
+      {
+        "sensor_pin": "SDA",
+        "board_pin": "GPIO21",
+        "direction": "bidirectional",
+        "uses_adc": false,
+        "note": "I2C data. Board default. Pull-up on most breakouts."
+      },
+      {
+        "sensor_pin": "SCL",
+        "board_pin": "GPIO22",
+        "direction": "output",
+        "uses_adc": false,
+        "note": "I2C clock. Board default."
+      },
+      {
+        "sensor_pin": "ADDR",
+        "board_pin": "GND",
+        "direction": "ground",
+        "uses_adc": false,
+        "note": "Address select: GND → 0x44, VDD → 0x45. Must not float."
+      },
+      {
+        "sensor_pin": "nRESET",
+        "board_pin": "3V3",
+        "direction": "power",
+        "uses_adc": false,
+        "note": "Active-low reset; tie high or leave open (internal pull-up)."
+      }
+    ],
+    "init_sequence": [
+      {
+        "register": "Soft reset",
+        "value": "0x30A2",
+        "purpose": "Return to default state after power-up",
+        "source_page": 12
+      },
+      {
+        "register": "Measurement",
+        "value": "0x2400",
+        "purpose": "Single shot, clock stretching disabled, high repeatability",
+        "source_page": 10
+      }
+    ],
+    "driver_code": "/*\n * SHT31-D humidity and temperature sensor driver — ESP32 DevKit (I2C)\n * Datasheet: Sensirion SHT3x-DIS\n *\n * Wiring (sensor pin -> board pin):\n *   VDD    -> 3V3\n *   VSS    -> GND\n *   SDA    -> GPIO21 (I2C SDA)\n *   SCL    -> GPIO22 (I2C SCL)\n *   ADDR   -> GND    (I2C address 0x44; VDD selects 0x45, p.9)\n *   nRESET -> 3V3    (or leave open: internal pull-up, p.9)\n *   ALERT  -> not connected\n */\n\n#include <Wire.h>                          // I2C driver (was missing in the first version)\n\nconst int I2C_SDA_PIN = 21;\nconst int I2C_SCL_PIN = 22;\nconst uint8_t SHT31_ADDR = 0x44;            // ADDR pin low (table 7, p.9)\n\n// Single-shot measurement, clock stretching disabled, high repeatability (table 8, p.10)\nconst uint8_t CMD_MEAS_HIGH_MSB = 0x24;\nconst uint8_t CMD_MEAS_HIGH_LSB = 0x00;\n// Soft reset (table 12, p.12)\nconst uint8_t CMD_SOFT_RESET_MSB = 0x30;\nconst uint8_t CMD_SOFT_RESET_LSB = 0xA2;\n\nbool sendCommand(uint8_t msb, uint8_t lsb) {\n  Wire.beginTransmission(SHT31_ADDR);\n  Wire.write(msb);\n  Wire.write(lsb);\n  return Wire.endTransmission() == 0;\n}\n\n// CRC-8: polynomial 0x31 (x^8 + x^5 + x^4 + 1), init 0xFF, no reflection (table 20, p.14)\nuint8_t crc8(const uint8_t *data, int len) {\n  uint8_t crc = 0xFF;\n  for (int i = 0; i < len; i++) {\n    crc ^= data[i];\n    for (int b = 0; b < 8; b++) {\n      crc = (crc & 0x80) ? (uint8_t)((crc << 1) ^ 0x31) : (uint8_t)(crc << 1);\n    }\n  }\n  return crc;\n}\n\nbool readMeasurement(float &tempC, float &rh) {\n  if (!sendCommand(CMD_MEAS_HIGH_MSB, CMD_MEAS_HIGH_LSB)) return false;\n  delay(16);                                 // high repeatability: max 15 ms (table 4, p.7)\n\n  uint8_t d[6];                              // T MSB, T LSB, CRC, RH MSB, RH LSB, CRC (p.11)\n  if (Wire.requestFrom(SHT31_ADDR, (uint8_t)6) != 6) return false;\n  for (int i = 0; i < 6; i++) d[i] = Wire.read();\n  if (crc8(d, 2) != d[2] || crc8(d + 3, 2) != d[5]) return false;\n\n  uint16_t rawT  = ((uint16_t)d[0] << 8) | d[1];\n  uint16_t rawRH = ((uint16_t)d[3] << 8) | d[4];\n  tempC = -45.0f + 175.0f * (float)rawT / 65535.0f;   // equation 2, p.14\n  rh    = 100.0f * (float)rawRH / 65535.0f;           // equation 1, p.14\n  return true;\n}\n\nvoid setup() {\n  Serial.begin(115200);\n  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);\n  Wire.setClock(400000);                     // fast mode supported (p.6)\n  sendCommand(CMD_SOFT_RESET_MSB, CMD_SOFT_RESET_LSB);\n  delay(2);                                  // soft reset time max 1.5 ms (table 4, p.7)\n  Serial.println(\"SHT31-D ready\");\n}\n\nvoid loop() {\n  float t, h;\n  if (readMeasurement(t, h)) {\n    Serial.print(\"T = \"); Serial.print(t, 2); Serial.print(\" C   \");\n    Serial.print(\"RH = \"); Serial.print(h, 2); Serial.println(\" %\");\n  } else {\n    Serial.println(\"SHT31-D read failed (I2C NACK or CRC mismatch)\");\n  }\n  delay(1000);\n}\n",
+    "libraries": [
+      "Wire"
+    ],
+    "warnings": [
+      "ADDR must be tied to GND or VDD; leaving it floating gives an undefined I2C address.",
+      "Each measurement's CRC-8 must be checked; the driver discards frames that fail.",
+      "Self-heating: continuous high-repeatability measurements faster than 1 Hz can bias temperature by ~0.1 °C."
+    ],
+    "source_pages": {
+      "part_name": 1,
+      "description": 1,
+      "interface": 10,
+      "operating_voltage": 6,
+      "logic_voltage": 6,
+      "i2c_address": 9,
+      "pins": 9,
+      "init_sequence": 10
+    }
+  },
+  "violations": [],
+  "autoCorrected": false,
+  "corrections": [],
+  "originalViolations": [],
+  "elapsedMs": 0,
+  "compile": {
+    "status": "fixed",
+    "attempts": [
+      {
+        "attempt": 1,
+        "success": false,
+        "errors": "sketch.ino:27:3: error: 'Wire' was not declared in this scope\n   Wire.beginTransmission(SHT31_ADDR);\n   ^~~~\nsketch.ino:50:7: error: 'Wire' was not declared in this scope\n   if (Wire.requestFrom(SHT31_ADDR, (uint8_t)6) != 6) return false;\n       ^~~~\nsketch.ino:51:38: error: 'Wire' was not declared in this scope\n   for (int i = 0; i < 6; i++) d[i] = Wire.read();\n                                      ^~~~\nsketch.ino:63:3: error: 'Wire' was not declared in this scope\n   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);\nError during build: exit status 1",
+        "warnings": "",
+        "duration_ms": 1340
+      },
+      {
+        "attempt": 2,
+        "success": true,
+        "errors": "",
+        "warnings": "",
+        "duration_ms": 9720
+      }
+    ],
+    "fixes": [
+      {
+        "attempt": 1,
+        "errors": "sketch.ino:27:3: error: 'Wire' was not declared in this scope\n   Wire.beginTransmission(SHT31_ADDR);\n   ^~~~\nsketch.ino:50:7: error: 'Wire' was not declared in this scope\n   if (Wire.requestFrom(SHT31_ADDR, (uint8_t)6) != 6) return false;\n       ^~~~\nsketch.ino:51:38: error: 'Wire' was not declared in this scope\n   for (int i = 0; i < 6; i++) d[i] = Wire.read();\n                                      ^~~~\nsketch.ino:63:3: error: 'Wire' was not declared in this scope\n   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);\nError during build: exit status 1",
+        "summary": "Added `#include <Wire.h>` at the top of the sketch so the Wire I2C object is declared. No pins, commands or formulas were changed."
+      }
+    ]
+  }
+}

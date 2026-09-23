@@ -84,10 +84,17 @@
       "i2c_address": 1,
       "pins": 2,
       "init_sequence": 14
-    }
+    },
+    "libraries": []
   },
   "violations": [],
   "autoCorrected": false,
   "corrections": [],
-  "originalViolations": []
+  "originalViolations": [],
+  "compile": {
+    "status": "skipped",
+    "attempts": [],
+    "fixes": [],
+    "message": "Compile check was not run for this demo."
+  }
 }

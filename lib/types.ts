@@ -60,9 +60,55 @@ export interface PartSpec {
   pins: PinAssignment[];
   init_sequence: InitStep[];
   driver_code: string;
+  /** Arduino libraries the sketch needs, by Library Manager name (e.g. "Wire"). */
+  libraries: string[];
   warnings: string[];
   /** field name -> datasheet page number where the value was found. */
   source_pages: Record<string, number>;
+}
+
+// ---------------------------------------------------------------------------
+// Compile check
+// ---------------------------------------------------------------------------
+
+export interface CompileAttempt {
+  /** 1 = the code as produced by extraction/auto-correction, 2+ = after a fix. */
+  attempt: number;
+  success: boolean;
+  errors: string;
+  warnings: string;
+  duration_ms: number;
+}
+
+export interface CompileFix {
+  /** The attempt number whose errors this fix addressed. */
+  attempt: number;
+  /** Compiler output that was sent to Claude. */
+  errors: string;
+  /** Claude's one-paragraph description of what it changed. */
+  summary: string;
+}
+
+export type CompileStatus =
+  /** COMPILE_SERVICE_URL / TOKEN not set, or not run for a demo. */
+  | "skipped"
+  /** Compiled on the first try. */
+  | "passed"
+  /** Compiled after one or more fix rounds. */
+  | "fixed"
+  /** Still failing after all retries. */
+  | "failed"
+  /** The compile service could not be reached or errored. */
+  | "unavailable";
+
+export interface CompileCheck {
+  status: CompileStatus;
+  attempts: CompileAttempt[];
+  fixes: CompileFix[];
+  /** FQBN reported by the compile service, when known. */
+  fqbn?: string;
+  /** Human-readable note (why skipped / unavailable, or the final error). */
+  message?: string;
 }
 
 export type Severity = "error" | "warning";
@@ -100,6 +146,8 @@ export interface GenerateResult {
   corrections: Correction[];
   /** Violations found on the *first* extraction, before correction. */
   originalViolations: Violation[];
+  /** Result of the arduino-cli compile-check loop (absent in old fixtures). */
+  compile?: CompileCheck;
   /** Milliseconds spent in the whole pipeline. */
   elapsedMs?: number;
   /** Set when a result was loaded from /public/demo instead of the API. */

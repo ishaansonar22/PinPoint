@@ -1,0 +1,8 @@
+{
+  "status": "passed",
+  "attempts": [
+    { "attempt": 1, "success": true, "errors": "", "warnings": "", "duration_ms": 1736 }
+  ],
+  "fixes": [],
+  "fqbn": "arduino:avr:uno"
+}
