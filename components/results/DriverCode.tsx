@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { useReducedMotion } from "@/components/motion/useReducedMotion";
+import { Check, Code2, Copy, Download } from "lucide-react";
 import { PrismLight as SyntaxHighlighter } from "react-syntax-highlighter";
 import cpp from "react-syntax-highlighter/dist/esm/languages/prism/cpp";
-import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import type { BoardDef } from "@/lib/boards";
 import type { CompileCheck } from "@/lib/types";
 import { Badge, Card, SectionTitle } from "../ui";
+import { codeTheme } from "./codeTheme";
 import { CompileBadge } from "./CompileCheck";
 
 SyntaxHighlighter.registerLanguage("cpp", cpp);
@@ -25,27 +28,26 @@ export default function DriverCode({
   compile?: CompileCheck;
 }) {
   const [copied, setCopied] = useState(false);
+  const reduce = useReducedMotion();
 
   useEffect(() => {
     if (!copied) return;
-    const t = setTimeout(() => setCopied(false), 1800);
+    const t = setTimeout(() => setCopied(false), 1600);
     return () => clearTimeout(t);
   }, [copied]);
 
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(code);
-      setCopied(true);
     } catch {
-      // Fallback for browsers without clipboard permissions.
       const ta = document.createElement("textarea");
       ta.value = code;
       document.body.appendChild(ta);
       ta.select();
       document.execCommand("copy");
       ta.remove();
-      setCopied(true);
     }
+    setCopied(true);
   };
 
   const download = () => {
@@ -63,54 +65,83 @@ export default function DriverCode({
   return (
     <Card className="overflow-hidden">
       <SectionTitle
+        icon={<Code2 size={14} />}
         right={
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <Badge>Arduino · {board.shortName}</Badge>
             {libraries.map((l) => (
-              <Badge key={l} tone="accent" title="Library required by the sketch">
+              <Badge key={l} tone="accent" mono title="Library required by the sketch">
                 {l}
               </Badge>
             ))}
-            {compile && compile.status !== "skipped" && <CompileBadge compile={compile} />}
-            <span className="text-[11px] text-ink-400">{lines} lines</span>
-            <button
-              type="button"
-              onClick={download}
-              className="rounded-md border border-ink-600 px-2.5 py-1 text-xs text-ink-200 transition hover:border-ink-400 hover:text-ink-50"
-            >
-              Download .ino
-            </button>
-            <button
-              type="button"
-              onClick={copy}
-              className={`rounded-md border px-2.5 py-1 text-xs font-medium transition ${
-                copied
-                  ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
-                  : "border-accent-500/50 bg-accent-500/10 text-accent-400 hover:bg-accent-500/20"
-              }`}
-            >
-              {copied ? "Copied ✓" : "Copy"}
-            </button>
+            <CompileBadge compile={compile} />
+            <span className="ml-1 font-mono text-[11px] text-muted">{lines} lines</span>
           </div>
         }
       >
         Driver code
       </SectionTitle>
-      <div className="max-h-[640px] overflow-auto text-[13px] leading-relaxed">
-        <SyntaxHighlighter
-          language="cpp"
-          style={vscDarkPlus}
-          showLineNumbers
-          customStyle={{
-            margin: 0,
-            padding: "1.25rem",
-            background: "transparent",
-            fontSize: "inherit",
-          }}
-          lineNumberStyle={{ color: "#3b4658", minWidth: "2.5em" }}
-        >
-          {code}
-        </SyntaxHighlighter>
+
+      <div className="relative">
+        {/* Sticky action bar */}
+        <div className="pointer-events-none sticky top-3 z-10 flex justify-end gap-2 px-4 pt-3">
+          <button
+            type="button"
+            onClick={download}
+            className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-border bg-surface/90 px-3 py-1.5 text-xs font-medium text-fg-2 backdrop-blur transition hover:border-border-strong hover:text-fg"
+          >
+            <Download size={13} /> .ino
+          </button>
+          <motion.button
+            type="button"
+            onClick={copy}
+            whileTap={reduce ? undefined : { scale: 0.95 }}
+            className={`pointer-events-auto relative inline-flex min-w-[88px] items-center justify-center gap-1.5 overflow-hidden rounded-full border px-3 py-1.5 text-xs font-semibold backdrop-blur transition ${
+              copied
+                ? "border-success/50 bg-success text-accent-fg shadow-[var(--shadow-glow-sm)]"
+                : "border-accent/40 bg-accent/15 text-accent-text hover:bg-accent/25"
+            }`}
+            aria-live="polite"
+          >
+            <AnimatePresence mode="wait" initial={false}>
+              {copied ? (
+                <motion.span
+                  key="copied"
+                  initial={reduce ? false : { y: 12, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={reduce ? undefined : { y: -12, opacity: 0 }}
+                  transition={{ duration: 0.18 }}
+                  className="inline-flex items-center gap-1.5"
+                >
+                  <Check size={13} strokeWidth={3} /> Copied!
+                </motion.span>
+              ) : (
+                <motion.span
+                  key="copy"
+                  initial={reduce ? false : { y: 12, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={reduce ? undefined : { y: -12, opacity: 0 }}
+                  transition={{ duration: 0.18 }}
+                  className="inline-flex items-center gap-1.5"
+                >
+                  <Copy size={13} /> Copy
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </motion.button>
+        </div>
+
+        <div className="scroll-thin -mt-9 max-h-[680px] overflow-auto bg-[var(--code-bg)] text-[13px]">
+          <SyntaxHighlighter
+            language="cpp"
+            style={codeTheme}
+            showLineNumbers
+            customStyle={{ margin: 0, padding: "2.75rem 1.25rem 1.25rem", background: "transparent", fontSize: "inherit" }}
+            lineNumberStyle={{ color: "var(--code-line)", minWidth: "2.75em", paddingRight: "1.25em" }}
+          >
+            {code}
+          </SyntaxHighlighter>
+        </div>
       </div>
     </Card>
   );

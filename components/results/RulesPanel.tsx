@@ -1,3 +1,4 @@
+import { CheckCircle2, ShieldCheck } from "lucide-react";
 import type { BoardDef } from "@/lib/boards";
 import { rulesForBoard } from "@/lib/rules";
 import type { GenerateResult, Violation } from "@/lib/types";
@@ -7,60 +8,52 @@ function ViolationItem({ v }: { v: Violation }) {
   const error = v.severity === "error";
   return (
     <li
-      className={`rounded-lg border px-3 py-2.5 ${
-        error ? "border-red-500/40 bg-red-500/10" : "border-amber-400/40 bg-amber-400/10"
+      className={`rounded-xl border px-3.5 py-3 ${
+        error ? "border-danger/30 bg-danger/[0.07]" : "border-warn/30 bg-warn/[0.07]"
       }`}
     >
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={error ? "error" : "warning"}>{v.severity}</Badge>
-        <span className="font-mono text-xs text-ink-50">
+        <span className="font-mono text-xs text-fg">
           {v.sensor_pin} → {v.board_pin}
         </span>
-        <span className="ml-auto font-mono text-[10px] text-ink-400">{v.rule_id}</span>
+        <span className="ml-auto font-mono text-[10px] text-muted-2">{v.rule_id}</span>
       </div>
-      <p className={`mt-1.5 text-xs leading-relaxed ${error ? "text-red-100" : "text-amber-50"}`}>
-        {v.message}
-      </p>
+      <p className="mt-1.5 text-xs leading-relaxed text-fg-2">{v.message}</p>
     </li>
   );
 }
 
 export default function RulesPanel({ result, board }: { result: GenerateResult; board: BoardDef }) {
   const rules = rulesForBoard(board.id);
-  const { violations, corrections, autoCorrected, originalViolations } = result;
+  const { violations } = result;
   const errors = violations.filter((v) => v.severity === "error");
   const warnings = violations.filter((v) => v.severity === "warning");
-  const fixedErrors = originalViolations.filter((v) => v.severity === "error").length;
 
   return (
-    <Card className="flex flex-col">
+    <Card className="flex h-full flex-col" hover>
       <SectionTitle
-        right={
-          <span className="text-[11px] text-ink-400">
-            {rules.length} rules · {board.name}
-          </span>
-        }
+        icon={<ShieldCheck size={14} />}
+        right={<span className="text-[11px] text-muted">{rules.length} rules · {board.name}</span>}
       >
         Rules check
       </SectionTitle>
       <div className="flex flex-1 flex-col gap-4 p-5">
         {violations.length === 0 ? (
-          <div className="flex items-center gap-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3">
-            <span className="grid h-8 w-8 place-items-center rounded-full bg-emerald-500/20 text-lg text-emerald-300">
-              ✓
-            </span>
+          <div className="flex items-center gap-3 rounded-xl border border-success/30 bg-success/[0.08] px-4 py-3.5">
+            <CheckCircle2 size={26} className="shrink-0 text-accent-text" strokeWidth={2.2} />
             <div>
-              <p className="text-sm font-semibold text-emerald-200">All checks passed ✓</p>
-              <p className="text-xs text-emerald-100/80">
+              <p className="text-sm font-semibold text-fg">All checks passed ✓</p>
+              <p className="text-xs text-muted">
                 Every pin assignment satisfies the {board.name} rules.
               </p>
             </div>
           </div>
         ) : (
           <div>
-            <p className="mb-2 text-xs text-ink-400">
-              {errors.length} error{errors.length === 1 ? "" : "s"}, {warnings.length} warning
-              {warnings.length === 1 ? "" : "s"} on the final wiring.
+            <p className="mb-2 text-xs text-muted">
+              {errors.length} error{errors.length === 1 ? "" : "s"} · {warnings.length} warning
+              {warnings.length === 1 ? "" : "s"} on the final wiring
             </p>
             <ul className="space-y-2">
               {violations.map((v, i) => (
@@ -70,42 +63,8 @@ export default function RulesPanel({ result, board }: { result: GenerateResult; 
           </div>
         )}
 
-        {autoCorrected && (
-          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge tone="success">Auto-corrected by rules engine</Badge>
-              <span className="text-xs text-ink-400">
-                {fixedErrors} error{fixedErrors === 1 ? "" : "s"} found on the first pass
-              </span>
-            </div>
-            {corrections.length > 0 ? (
-              <ul className="mt-3 space-y-2">
-                {corrections.map((c, i) => (
-                  <li key={i} className="text-xs">
-                    <div className="flex flex-wrap items-center gap-1.5 font-mono text-ink-50">
-                      <span className="font-semibold">{c.sensor_pin}</span>
-                      <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-red-300 line-through">
-                        {c.original_pin}
-                      </span>
-                      <span className="text-ink-400">→</span>
-                      <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-emerald-300">
-                        {c.new_pin}
-                      </span>
-                    </div>
-                    <p className="mt-1 leading-relaxed text-ink-200">{c.reason}</p>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-2 text-xs text-ink-200">
-                Claude returned the same pins; see the remaining violations above.
-              </p>
-            )}
-          </div>
-        )}
-
-        <details className="mt-auto text-xs text-ink-400">
-          <summary className="cursor-pointer select-none hover:text-ink-200">
+        <details className="mt-auto text-xs text-muted">
+          <summary className="cursor-pointer select-none rounded-md hover:text-fg">
             Rules applied for {board.name}
           </summary>
           <ul className="mt-2 space-y-1.5">
@@ -115,7 +74,7 @@ export default function RulesPanel({ result, board }: { result: GenerateResult; 
                   {r.severity}
                 </Badge>
                 <span>
-                  <span className="text-ink-200">{r.title}.</span> {r.description}
+                  <span className="text-fg-2">{r.title}.</span> {r.description}
                 </span>
               </li>
             ))}

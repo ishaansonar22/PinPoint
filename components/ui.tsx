@@ -1,44 +1,64 @@
-import type { ReactNode } from "react";
+"use client";
 
+import type { ReactNode } from "react";
+import { motion } from "framer-motion";
+import { useReducedMotion } from "@/components/motion/useReducedMotion";
+
+/* ---------------------------------------------------------------------------
+   Card: glass surface with thin border. `hover` adds a subtle lift.
+--------------------------------------------------------------------------- */
 export function Card({
   children,
   className = "",
+  hover = false,
 }: {
   children: ReactNode;
   className?: string;
+  hover?: boolean;
 }) {
+  const reduce = useReducedMotion();
   return (
-    <section
-      className={`min-w-0 rounded-2xl border border-ink-700/70 bg-ink-900/80 shadow-[0_1px_0_0_rgba(255,255,255,0.03)_inset] backdrop-blur ${className}`}
+    <motion.section
+      whileHover={hover && !reduce ? { y: -2 } : undefined}
+      transition={{ duration: 0.2 }}
+      className={`glass min-w-0 rounded-[var(--radius-card)] ${hover ? "hover:border-border-strong" : ""} ${className}`}
     >
       {children}
-    </section>
+    </motion.section>
   );
 }
 
 export function SectionTitle({
   children,
   right,
+  icon,
 }: {
   children: ReactNode;
   right?: ReactNode;
+  icon?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ink-700/70 px-5 py-3">
-      <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-200">{children}</h2>
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-5 py-3.5">
+      <h2 className="inline-flex items-center gap-2 text-[13px] font-semibold uppercase tracking-[0.12em] text-muted">
+        {icon && <span className="text-accent-text">{icon}</span>}
+        {children}
+      </h2>
       {right}
     </div>
   );
 }
 
+/* ---------------------------------------------------------------------------
+   Badges
+--------------------------------------------------------------------------- */
 export type BadgeTone = "neutral" | "accent" | "error" | "warning" | "success";
 
 const TONES: Record<BadgeTone, string> = {
-  neutral: "border-ink-600 bg-ink-800 text-ink-200",
-  accent: "border-accent-500/40 bg-accent-500/10 text-accent-400",
-  error: "border-red-500/40 bg-red-500/10 text-red-300",
-  warning: "border-amber-400/40 bg-amber-400/10 text-amber-300",
-  success: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
+  neutral: "border-border bg-surface-2 text-fg-2",
+  accent: "border-accent/30 bg-accent/10 text-accent-text",
+  error: "border-danger/40 bg-danger/10 text-danger",
+  warning: "border-warn/40 bg-warn/10 text-warn",
+  success: "border-success/40 bg-success/10 text-accent-text",
 };
 
 export function Badge({
@@ -46,28 +66,63 @@ export function Badge({
   tone = "neutral",
   className = "",
   title,
+  mono = false,
 }: {
   children: ReactNode;
   tone?: BadgeTone;
   className?: string;
   title?: string;
+  mono?: boolean;
 }) {
   return (
     <span
       title={title}
-      className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium leading-none ${TONES[tone]} ${className}`}
+      className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium leading-none ${mono ? "font-mono" : ""} ${TONES[tone]} ${className}`}
     >
       {children}
     </span>
   );
 }
 
-/** Small "p.15" badge showing where a value came from in the datasheet. */
+/** Larger status badge that pops in. */
+export function StatusBadge({
+  children,
+  tone,
+  icon,
+  delay = 0,
+}: {
+  children: ReactNode;
+  tone: BadgeTone;
+  icon?: ReactNode;
+  delay?: number;
+}) {
+  const reduce = useReducedMotion();
+  return (
+    <motion.span
+      initial={{ opacity: 0, scale: 0.85 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={
+        reduce ? { duration: 0 } : { duration: 0.25, delay, type: "spring", stiffness: 380, damping: 24 }
+      }
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-semibold ${TONES[tone]}`}
+    >
+      {icon}
+      {children}
+    </motion.span>
+  );
+}
+
+/** Small "p.15" mono pill showing where a value came from in the datasheet. */
 export function SourceBadge({ page }: { page: number | undefined }) {
   if (!page) return null;
   return (
-    <Badge tone="accent" title={`Found on datasheet page ${page}`}>
+    <Badge tone="accent" mono title={`Found on datasheet page ${page}`}>
       p.{page}
     </Badge>
   );
+}
+
+/** Inline monospace token (pin names, registers, addresses). */
+export function Mono({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return <code className={`font-mono text-[0.92em] ${className}`}>{children}</code>;
 }

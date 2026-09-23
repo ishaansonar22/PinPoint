@@ -1,28 +1,28 @@
-import Image from "next/image";
+import GithubIcon from "./icons/GithubIcon";
+import Logo from "./Logo";
+import ThemeToggle from "./theme/ThemeToggle";
+
+export const GITHUB_URL = "https://github.com/ishaansonar22/PinPoint";
 
 export default function Header() {
   return (
-    <header className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex items-center gap-3 sm:gap-5">
-        <Image
-          src="/logo.png"
-          alt="PinPoint logo"
-          width={160}
-          height={160}
-          priority
-          className="h-28 w-28 shrink-0 select-none sm:h-40 sm:w-40"
-        />
-        <div>
-          <h1 className="sr-only">PinPoint</h1>
-          <p className="text-xl font-semibold tracking-tight text-ink-50 sm:text-2xl">
-            From datasheet to working code, verified.
-          </p>
-        </div>
-      </div>
-      <p className="max-w-md text-xs leading-relaxed text-ink-400 sm:text-right">
-        Upload a component datasheet, pick a board, and get wiring plus driver code.
-        Every pin choice is checked by a deterministic rules engine — not the AI.
-      </p>
+    <header className="flex items-center justify-between py-2">
+      <a href="/" className="rounded-md" aria-label="PinPoint home">
+        <Logo size={26} textClassName="text-[19px]" />
+      </a>
+      <nav className="flex items-center gap-2" aria-label="Site">
+        <a
+          href={GITHUB_URL}
+          target="_blank"
+          rel="noreferrer"
+          aria-label="PinPoint on GitHub"
+          title="GitHub"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface-2/60 text-muted transition hover:border-border-strong hover:text-fg"
+        >
+          <GithubIcon size={16} />
+        </a>
+        <ThemeToggle />
+      </nav>
     </header>
   );
 }
